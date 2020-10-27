@@ -1,31 +1,16 @@
-.PHONY : all
-
-#n.b. the '-y' sets autoexec scripts to 'on' so that driver expressions will work
-UNAME_S := $(shell uname -s)
-ifeq ($(UNAME_S),Darwin)
-	BLENDER = /Applications/Blender/blender.app/Contents/MacOS/blender -y
-else ifeq ($(UNAME_S),Linux)
-	BLENDER = ../../blender-2.90.0-linux64/blender -y
-else
-	BLENDER = blender
-endif
-
-EXPORT_MESHES=export-meshes.py
-EXPORT_WALKMESHES=export-walkmeshes.py
-EXPORT_SCENE=export-scene.py
-
-DIST=../dist
+#This makefile for Windows was originally made by Dominic Calkosz and made available in the class Discord.
+#I did not write this makefile originally, I edited it for scenes besides hexapod and to run export-walkmeshes.py
 
 all : \
-	$(DIST)/phone-bank.pnct \
-	$(DIST)/phone-bank.w \
-	$(DIST)/phone-bank.scene \
+    ../dist/game2-city.pnct \
+    ../dist/game2-city.scene \
+#    ../dist/game2-city.w \
 
-$(DIST)/phone-bank.pnct : phone-bank.blend $(EXPORT_MESHES)
-	$(BLENDER) --background --python $(EXPORT_MESHES) -- '$<':Platforms '$@'
+../dist/game2-city.scene : game2-city.blend export-scene.py
+    "C:\Program Files\Blender Foundation\Blender 2.90\blender.exe" --background --python export-scene.py -- "game2-city.blend:Main" "../dist/game2-city.scene"
 
-$(DIST)/phone-bank.scene : phone-bank.blend $(EXPORT_SCENE)
-	$(BLENDER) --background --python $(EXPORT_SCENE) -- '$<':Platforms '$@'
+../dist/game2-city.pnct : game2-city.blend export-meshes.py
+    "C:\Program Files\Blender Foundation\Blender 2.90\blender.exe" --background --python export-meshes.py -- "game2-city.blend:Main" "../dist/game2-city.pnct"
 
-$(DIST)/phone-bank.w : phone-bank.blend $(EXPORT_WALKMESHES)
-	$(BLENDER) --background --python $(EXPORT_WALKMESHES) -- '$<':WalkMeshes '$@'
+#../dist/game2-city.w : game2-city.blend export-walkmeshes.py
+#    "C:\Program Files\Blender Foundation\Blender 2.90\blender.exe" --background --python export-walkmeshes.py -- "game2-city.blend:WalkMeshes" "../dist/game2-city.w"

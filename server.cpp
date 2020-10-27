@@ -9,6 +9,18 @@
 #include <cassert>
 #include <unordered_map>
 
+#include <glm/glm.hpp>
+
+int num_connected = 0;
+int it_player = 0;
+
+uint8_t absolute_float_to_uint8_t(float f) {
+	f = std::abs(f);
+	int tens = (int)f % 10;
+	int ones = (int)f - (tens * 10);
+	return tens * 10 + ones;
+}
+
 int main(int argc, char **argv) {
 #ifdef _WIN32
 	//when compiled on windows, unhandled exceptions don't have their message printed, which can make debugging simple issues difficult.
@@ -28,7 +40,7 @@ int main(int argc, char **argv) {
 
 
 	//------------ main loop ------------
-	constexpr float ServerTick = 1.0f / 10.0f; //TODO: set a server tick that makes sense for your game
+	constexpr float ServerTick = 1.0f / 60.0f; //60fps is almost certainly over-kill, but idk, I like it lol
 
 	//server state:
 
@@ -36,18 +48,18 @@ int main(int argc, char **argv) {
 	struct PlayerInfo {
 		PlayerInfo() {
 			static uint32_t next_player_id = 1;
+			id = next_player_id;
 			name = "Player" + std::to_string(next_player_id);
 			next_player_id += 1;
+
+			position = glm::vec3(0.0f, 0.0f, -10.0f);
+			//euler_angles = glm::vec3(45.0f, 0.0f, 0.0f);
 		}
+
+		int id;
 		std::string name;
-
-		uint32_t left_presses = 0;
-		uint32_t right_presses = 0;
-		uint32_t up_presses = 0;
-		uint32_t down_presses = 0;
-
-		int32_t total = 0;
-
+		glm::vec3 position;
+		glm::vec3 euler_angles;
 	};
 	std::unordered_map< Connection *, PlayerInfo > players;
 
@@ -64,13 +76,25 @@ int main(int argc, char **argv) {
 			server.poll([&](Connection *c, Connection::Event evt){
 				if (evt == Connection::OnOpen) {
 					//client connected:
+					num_connected++;
 
 					//create some player info for them:
 					players.emplace(c, PlayerInfo());
 
+					//find out which player the client is:
+					std::string connection_message = "Client is player ";
+					connection_message.append(std::to_string(num_connected));
+					std::cout << connection_message << std::endl;
 
+					//let the client know which player it is:
+					c->send('m');
+					c->send(uint8_t(connection_message.size() >> 16));
+					c->send(uint8_t((connection_message.size() >> 8) % 256));
+					c->send(uint8_t(connection_message.size() % 256));
+					c->send_buffer.insert(c->send_buffer.end(), connection_message.begin(), connection_message.end());
 				} else if (evt == Connection::OnClose) {
 					//client disconnected:
+					//num_connected--;
 
 					//remove them from the players list:
 					auto f = players.find(c);
@@ -80,7 +104,7 @@ int main(int argc, char **argv) {
 
 				} else { assert(evt == Connection::OnRecv);
 					//got data from client:
-					std::cout << "got bytes:\n" << hex_dump(c->recv_buffer); std::cout.flush();
+					//std::cout << "got bytes:\n" << hex_dump(c->recv_buffer); std::cout.flush();
 
 					//look up in players list:
 					auto f = players.find(c);
@@ -88,9 +112,8 @@ int main(int argc, char **argv) {
 					PlayerInfo &player = f->second;
 
 					//handle messages from client:
-					//TODO: update for the sorts of messages your clients send
-					while (c->recv_buffer.size() >= 5) {
-						//expecting five-byte messages 'b' (left count) (right count) (down count) (up count)
+					while (c->recv_buffer.size() >= 10) {
+						//expecting 'f' + seven float messages 'f' (x_pos) (y_pos) (z_pos) (x_rot) (y_rot) (z_rot)
 						char type = c->recv_buffer[0];
 						if (type != 'b') {
 							std::cout << " message of non-'b' type received from client!" << std::endl;
@@ -98,62 +121,81 @@ int main(int argc, char **argv) {
 							c->close();
 							return;
 						}
-						uint8_t left_count = c->recv_buffer[1];
-						uint8_t right_count = c->recv_buffer[2];
-						uint8_t down_count = c->recv_buffer[3];
-						uint8_t up_count = c->recv_buffer[4];
 
-						player.left_presses += left_count;
-						player.right_presses += right_count;
-						player.down_presses += down_count;
-						player.up_presses += up_count;
+						//for getting a float out of a string: https://www.programiz.com/cpp-programming/string-float-conversion
+						//construct position floats
+						float client_x = std::stof(std::to_string(c->recv_buffer[2]));
+						client_x += (std::stof(std::to_string(c->recv_buffer[3])) / 100.0f);
+						if (c->recv_buffer[1] == (uint8_t)1) client_x *= -1.0f;
+						float client_y = std::stof(std::to_string(c->recv_buffer[5]));
+						client_y += (std::stof(std::to_string(c->recv_buffer[6])) / 100.0f);
+						if (c->recv_buffer[4] == (uint8_t)1) client_y *= -1.0f;
+						float client_z = std::stof(std::to_string(c->recv_buffer[8]));
+						client_z += (std::stof(std::to_string(c->recv_buffer[9])) / 100.0f);
+						if (c->recv_buffer[7] == (uint8_t)1) client_z *= -1.0f;
 
-						c->recv_buffer.erase(c->recv_buffer.begin(), c->recv_buffer.begin() + 5);
+						//set the position of this player:
+						player.position = glm::vec3(client_x, client_y, client_z);
+
+						//consume this part of the buffer:
+						c->recv_buffer.erase(c->recv_buffer.begin(), c->recv_buffer.begin() + 10);
 					}
 				}
 			}, remain);
 		}
 
 		//update current game state
-		//TODO: replace with *your* game state update
-		std::string status_message = "";
-		int32_t overall_sum = 0;
+		glm::vec3 positions[4] = { };
 		for (auto &[c, player] : players) {
 			(void)c; //work around "unused variable" warning on whatever version of g++ github actions is running
-			for (; player.left_presses > 0; --player.left_presses) {
-				player.total -= 1;
-			}
-			for (; player.right_presses > 0; --player.right_presses) {
-				player.total += 1;
-			}
-			for (; player.down_presses > 0; --player.down_presses) {
-				player.total -= 10;
-			}
-			for (; player.up_presses > 0; --player.up_presses) {
-				player.total += 10;
-			}
-			if (status_message != "") status_message += " + ";
-			status_message += std::to_string(player.total) + " (" + player.name + ")";
-
-			overall_sum += player.total;
+			positions[player.id] = player.position;
 		}
-		status_message += " = " + std::to_string(overall_sum);
-		//std::cout << status_message << std::endl; //DEBUG
 
 		//send updated game state to all clients
-		//TODO: update for your game state
-		for (auto &[c, player] : players) {
-			(void)player; //work around "unused variable" warning on whatever g++ github actions uses
-			//send an update starting with 'm', a 24-bit size, and a blob of text:
-			c->send('m');
-			c->send(uint8_t(status_message.size() >> 16));
-			c->send(uint8_t((status_message.size() >> 8) % 256));
-			c->send(uint8_t(status_message.size() % 256));
-			c->send_buffer.insert(c->send_buffer.end(), status_message.begin(), status_message.end());
+		for (auto &[c, player_unused] : players) {
+			(void)player_unused; //work around "unused variable" warning on whatever version of g++ github actions is running
+			for (auto &[c_unused, player] : players) {
+				(void)c_unused; //work around "unused variable" warning on whatever version of g++ github actions is running
+				
+				//send an update starting with 'f', then 24 floats representing the camera transforms:
+				c->send('t');
+
+				//get the sign for each axis of the player position:
+				uint8_t x_pos_sign = 0;
+				if (player.position.x < 0.0f) x_pos_sign = 1;
+				uint8_t y_pos_sign = 0;
+				if (player.position.y < 0.0f) y_pos_sign = 1;
+				uint8_t z_pos_sign = 0;
+				if (player.position.z < 0.0f) z_pos_sign = 1;
+
+				//get the digits to the left of the deimcal point:
+				uint8_t x_pos = absolute_float_to_uint8_t(player.position.x);
+				uint8_t y_pos = absolute_float_to_uint8_t(player.position.y);
+				uint8_t z_pos = absolute_float_to_uint8_t(player.position.z);
+
+				//get the first two digits to the right of the decimal point:
+				uint8_t x_pos_decimal = absolute_float_to_uint8_t((std::abs(player.position.x) - x_pos) * 100.0f);
+				uint8_t y_pos_decimal = absolute_float_to_uint8_t((std::abs(player.position.y) - y_pos) * 100.0f);
+				uint8_t z_pos_decimal = absolute_float_to_uint8_t((std::abs(player.position.z) - z_pos) * 100.0f);
+
+				//queue the current player position:
+				c->send(x_pos_sign);
+				c->send(x_pos);
+				c->send(x_pos_decimal);
+				c->send(y_pos_sign);
+				c->send(y_pos);
+				c->send(y_pos_decimal);
+				c->send(z_pos_sign);
+				c->send(z_pos);
+				c->send(z_pos_decimal);
+
+				//TODO: queue the current player rotation in euler angles
+			}
+
+			//send info for who is it
 		}
 
 	}
-
 
 	return 0;
 

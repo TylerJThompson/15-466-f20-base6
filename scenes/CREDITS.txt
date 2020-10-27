@@ -8,3 +8,6 @@ Authors to credit:
  sphere-roller.blend -- Jim McCann
  sphere-world.blend -- Jim McCann
  phone-bank.blend -- Jim McCann
+
+The Makefile in this folder was originally made by Dominic Calkosz and made available in the class Discord.
+I did not write the Makefile originally, I edited it for scenes besides hexapod and to run export-walkmeshes.py

@@ -58,4 +58,5 @@ struct PlayMode : Mode {
 
 	//for use in the tag game:
 	bool player_is_it = false;
+	float time_it = 5000.0f;
 };

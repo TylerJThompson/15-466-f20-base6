@@ -131,6 +131,12 @@ bool PlayMode::handle_event(SDL_Event const &evt, glm::uvec2 const &window_size)
 }
 
 void PlayMode::update(float elapsed) {
+	//check if the player is it:
+	if (server_message == "You are it! Tag someone!")
+		time_it += elapsed;
+	else if (time_it != 5000.0f)
+		time_it = 5000.0f;
+
 	//use the fact that camera != nullptr as an indication that the camera is connected
 	if (camera != nullptr) {
 		time_since_connection += elapsed;
@@ -171,9 +177,9 @@ void PlayMode::update(float elapsed) {
 			//TODO: queue the current camera rotation in euler angles
 		}
 
-		//from my game3 code (edited from base code), edited for game6:
 		//move camera:
-		{
+		if (time_it >= 3.0f) {
+			//from my game3 code (edited from base code), edited for game6:
 			//how fast the player moves
 			constexpr float PlayerSpeed = 3.0f;
 
@@ -185,7 +191,12 @@ void PlayMode::update(float elapsed) {
 			if (!down.pressed && up.pressed) move.y = 1.0f;
 
 			//make it so that moving diagonally doesn't go faster:
-			if (move != glm::vec2(0.0f)) move = glm::normalize(move) * PlayerSpeed * elapsed;
+			if (move != glm::vec2(0.0f)) {
+				if (time_it == 5000.0f)
+					move = glm::normalize(move) * PlayerSpeed * elapsed;
+				else
+					move = glm::normalize(move) * PlayerSpeed * elapsed * 1.5f;
+			}
 
 			glm::mat4x3 frame = camera->transform->make_local_to_world();
 			glm::vec3 right = frame[0];
@@ -212,8 +223,26 @@ void PlayMode::update(float elapsed) {
 			if (camera->transform->position.y > 21.0f) camera->transform->position.y = 21.0f;
 			else if (camera->transform->position.y < -15.0f) camera->transform->position.y = -15.0f;
 			camera->transform->position.z = 0.6f;
+			//end of code from game3
+
+			//tag someone if close enough:
+			if (time_it != 5000.0f) {
+				for (int i = 0; i < cameras.size(); i++) {
+					Scene::Camera *vector_cam = &cameras[i];
+					if (camera != vector_cam) {
+						glm::vec3 vector_cam_pos = vector_cam->transform->position;
+						if (vector_cam_pos.z >= 0.6f) {
+							glm::vec3 cam_pos = camera->transform->position;
+							float dist = std::sqrt(std::pow(cam_pos.x - vector_cam_pos.x, 2) + std::pow(cam_pos.y - vector_cam_pos.y, 2));
+							if (dist <= 0.25f) {
+								client.connections.back().send('t');
+								client.connections.back().send((uint8_t)(i));
+							}
+						}
+					}
+				}
+			}
 		}
-		//end of code from game3
 	}
 
 	//reset button press counters:
@@ -251,6 +280,10 @@ void PlayMode::update(float elapsed) {
 
 					//and consume this part of the buffer:
 					c->recv_buffer.erase(c->recv_buffer.begin(), c->recv_buffer.begin() + 4 + size);
+
+					//for when the player is it:
+					if (time_it == 5000.0f && server_message == "You are it! Tag someone!")
+						time_it = 0.0f;
 
 					//for help with finding if a string contains a substring: https://stackoverflow.com/questions/2340281/check-if-a-string-contains-a-string-in-c
 					if (camera == nullptr && server_message.find("Client is player ") != std::string::npos) {
@@ -318,7 +351,7 @@ void PlayMode::update(float elapsed) {
 					//for debugging:
 					for (int i = 0; i < cameras.size(); i++) {
 						Scene::Camera *vector_cam = &cameras[i];
-						std::cout << "Camera " << i << " position: " << vector_cam->transform->position.x << ", " << vector_cam->transform->position.y << ", " << vector_cam->transform->position.z << std::endl;
+						//std::cout << "Camera " << i << " position: " << vector_cam->transform->position.x << ", " << vector_cam->transform->position.y << ", " << vector_cam->transform->position.z << std::endl;
 					}
 				}
 			}
@@ -377,7 +410,7 @@ void PlayMode::draw(glm::uvec2 const &drawable_size) {
 				glm::u8vec4(0xff, 0xff, 0xff, 0x00));
 		};
 
-		draw_text(glm::vec2(-aspect + 0.1f,-0.9f), "(press WASD to change your total)", 0.09f);
+		draw_text(glm::vec2(-aspect + 0.1f,-0.9f), server_message, 0.09f);
 	}
 	GL_ERRORS();
 }

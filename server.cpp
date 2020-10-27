@@ -12,7 +12,7 @@
 #include <glm/glm.hpp>
 
 int num_connected = 0;
-int it_player = 0;
+int it_player = 1;
 
 uint8_t absolute_float_to_uint8_t(float f) {
 	f = std::abs(f);
@@ -115,30 +115,40 @@ int main(int argc, char **argv) {
 					while (c->recv_buffer.size() >= 10) {
 						//expecting 'f' + seven float messages 'f' (x_pos) (y_pos) (z_pos) (x_rot) (y_rot) (z_rot)
 						char type = c->recv_buffer[0];
-						if (type != 'b') {
-							std::cout << " message of non-'b' type received from client!" << std::endl;
+						if (type != 'b' && type != 't') {
+							std::cout << " message of non-'b' or 't' type received from client!" << std::endl;
 							//shut down client connection:
 							c->close();
 							return;
 						}
 
-						//for getting a float out of a string: https://www.programiz.com/cpp-programming/string-float-conversion
-						//construct position floats
-						float client_x = std::stof(std::to_string(c->recv_buffer[2]));
-						client_x += (std::stof(std::to_string(c->recv_buffer[3])) / 100.0f);
-						if (c->recv_buffer[1] == (uint8_t)1) client_x *= -1.0f;
-						float client_y = std::stof(std::to_string(c->recv_buffer[5]));
-						client_y += (std::stof(std::to_string(c->recv_buffer[6])) / 100.0f);
-						if (c->recv_buffer[4] == (uint8_t)1) client_y *= -1.0f;
-						float client_z = std::stof(std::to_string(c->recv_buffer[8]));
-						client_z += (std::stof(std::to_string(c->recv_buffer[9])) / 100.0f);
-						if (c->recv_buffer[7] == (uint8_t)1) client_z *= -1.0f;
+						if (type == 'b') {
+							//for getting a float out of a string: https://www.programiz.com/cpp-programming/string-float-conversion
+							//construct position floats
+							float client_x = std::stof(std::to_string(c->recv_buffer[2]));
+							client_x += (std::stof(std::to_string(c->recv_buffer[3])) / 100.0f);
+							if (c->recv_buffer[1] == (uint8_t)1) client_x *= -1.0f;
+							float client_y = std::stof(std::to_string(c->recv_buffer[5]));
+							client_y += (std::stof(std::to_string(c->recv_buffer[6])) / 100.0f);
+							if (c->recv_buffer[4] == (uint8_t)1) client_y *= -1.0f;
+							float client_z = std::stof(std::to_string(c->recv_buffer[8]));
+							client_z += (std::stof(std::to_string(c->recv_buffer[9])) / 100.0f);
+							if (c->recv_buffer[7] == (uint8_t)1) client_z *= -1.0f;
 
-						//set the position of this player:
-						player.position = glm::vec3(client_x, client_y, client_z);
+							//set the position of this player:
+							player.position = glm::vec3(client_x, client_y, client_z);
 
-						//consume this part of the buffer:
-						c->recv_buffer.erase(c->recv_buffer.begin(), c->recv_buffer.begin() + 10);
+							//consume this part of the buffer:
+							c->recv_buffer.erase(c->recv_buffer.begin(), c->recv_buffer.begin() + 10);
+						}
+						
+						if (type == 't') {
+							//set the player that is now it:
+							it_player = (int)(c->recv_buffer[1]) + 1;
+
+							//consume this part of the buffer:
+							c->recv_buffer.erase(c->recv_buffer.begin(), c->recv_buffer.begin() + 2);
+						}
 					}
 				}
 			}, remain);
@@ -153,7 +163,7 @@ int main(int argc, char **argv) {
 
 		//send updated game state to all clients
 		for (auto &[c, player_unused] : players) {
-			(void)player_unused; //work around "unused variable" warning on whatever version of g++ github actions is running
+			//(void)player_unused; //work around "unused variable" warning on whatever version of g++ github actions is running
 			for (auto &[c_unused, player] : players) {
 				(void)c_unused; //work around "unused variable" warning on whatever version of g++ github actions is running
 				
@@ -192,7 +202,37 @@ int main(int argc, char **argv) {
 				//TODO: queue the current player rotation in euler angles
 			}
 
-			//send info for who is it
+			if (player_unused.id == it_player) {
+				//send info that you are it
+				std::string it_message = "You are it! Tag someone!";
+
+				//let the client know which player it is:
+				c->send('m');
+				c->send(uint8_t(it_message.size() >> 16));
+				c->send(uint8_t((it_message.size() >> 8) % 256));
+				c->send(uint8_t(it_message.size() % 256));
+				c->send_buffer.insert(c->send_buffer.end(), it_message.begin(), it_message.end());
+			} else {
+				//send info for who is it
+				std::string it_message = "";
+				if (it_player == 1)
+					it_message.append("Red");
+				else if (it_player == 2)
+					it_message.append("Green");
+				else if (it_player == 3)
+					it_message.append("Blue");
+				else if (it_player == 4)
+					it_message.append("Purple");
+				it_message.append(" is it!");
+
+				//let the client know which player it is:
+				c->send('m');
+				c->send(uint8_t(it_message.size() >> 16));
+				c->send(uint8_t((it_message.size() >> 8) % 256));
+				c->send(uint8_t(it_message.size() % 256));
+				c->send_buffer.insert(c->send_buffer.end(), it_message.begin(), it_message.end());
+			}
+			
 		}
 
 	}
